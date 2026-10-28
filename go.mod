@@ -1,4 +1,4 @@
-module github.com/MohammadBnei/mountain/pkg
+module github.com/MohammadBnei/ukubi-go
 
 go 1.27
 
