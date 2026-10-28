@@ -32,7 +32,7 @@ Neither reader depends on the order of the details.
 
 Go apps import the generated package and never generate their own Go copy of `errors.proto`: protobuf-go panics at start-up when two packages register the same file. A TypeScript client generates TS only from a copy, or reads the detail by hand as islands does.
 
-Contributors: `proto/` is one buf module (`buf.yaml`: STANDARD lint, PACKAGE breaking). After editing a `.proto`, run `(cd proto && buf lint && buf generate --clean)` and commit `proto/gen`; `buf generate` runs protoc-gen-go through `go run`, so the generator is the protobuf version `go.mod` pins. CI fails on lint, on a break against main (unless a commit says `BREAKING CHANGE:`), and on generated code that differs from what is committed.
+Contributors: `proto/` is one buf module (`buf.yaml`: STANDARD lint, PACKAGE breaking). After editing a `.proto`, run `(cd proto && buf lint && buf generate --clean)` and commit `proto/gen`; `buf generate` runs protoc-gen-go through `go run`, so the generator is the protobuf version `go.mod` pins. CI fails on lint, on a break against the base (the PR's base branch, or main's previous commit on a push), unless a commit touching `proto/` says `BREAKING CHANGE:`, and on generated code that differs from what is committed.
 
 ## License
 
