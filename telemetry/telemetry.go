@@ -26,6 +26,7 @@ package telemetry
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -39,20 +40,19 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // Tracing is an app's tracer, or none (the zero value: Handler wraps nothing).
-type Tracing struct {
-	tp       trace.TracerProvider
-	flush    func(context.Context) error
-	shutdown func(context.Context) error
-}
+type Tracing struct{ tp *sdktrace.TracerProvider }
 
 // New is the tracing for endpoint, the OTLP/HTTP traces URL in full (its /v1/traces path included; "" = none).
 func New(endpoint, service string) (*Tracing, error) {
 	if endpoint == "" {
 		return &Tracing{}, nil
+	}
+	// The exporter only logs a bad URL and keeps its default; a URL without a scheme parses to the wrong host.
+	if u, err := url.Parse(endpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, fmt.Errorf("telemetry: the traces endpoint %q is not an http(s) URL with a host", endpoint)
 	}
 	exp, err := otlptracehttp.New(context.Background(), otlptracehttp.WithEndpointURL(endpoint),
 		otlptracehttp.WithProxy(func(*http.Request) (*url.URL, error) { return nil, nil })) // in-cluster: no proxy
@@ -68,7 +68,7 @@ func WithExporter(exp sdktrace.SpanExporter, service string) *Tracing {
 	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp),
 		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())),
 		sdktrace.WithResource(resource.NewSchemaless(semconv.ServiceName(service))))
-	return &Tracing{tp: tp, flush: tp.ForceFlush, shutdown: tp.Shutdown}
+	return &Tracing{tp: tp}
 }
 
 // Handler is h with a server span per request named pattern, or h itself without tracing.
@@ -86,20 +86,22 @@ func (t *Tracing) Handler(pattern string, h http.Handler) http.Handler {
 
 // Flush exports the spans buffered so far, or does nothing without tracing.
 func (t *Tracing) Flush() error {
-	if t == nil || t.flush == nil {
+	if t == nil || t.tp == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return t.flush(ctx)
+	return within5s(t.tp.ForceFlush)
 }
 
 // Shutdown flushes the spans still buffered (a few seconds at most), or does nothing without tracing.
 func (t *Tracing) Shutdown() error {
-	if t == nil || t.shutdown == nil {
+	if t == nil || t.tp == nil {
 		return nil
 	}
+	return within5s(t.tp.Shutdown)
+}
+
+func within5s(f func(context.Context) error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return t.shutdown(ctx)
+	return f(ctx)
 }

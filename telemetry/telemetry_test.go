@@ -40,6 +40,11 @@ func TestNone(t *testing.T) {
 		t.Errorf("an endpoint: %v", err) // the positive control: an endpoint makes a tracer (export happens later)
 	}
 	_ = tr.Shutdown()
+	for _, bad := range []string{"http://[bad", "otel-collector:4318", "collector.svc/v1/traces"} {
+		if _, err := New(bad, "x"); err == nil {
+			t.Errorf("%q: no error", bad)
+		}
+	}
 }
 
 // TestSpans: with tracing, a request gets one server span named by its route's pattern, and the answer is the
@@ -87,6 +92,9 @@ func TestErrorHandler(t *testing.T) {
 		"none":     `level=INFO msg="export refused"`,
 	}
 	if mode := os.Getenv("TELEMETRY_ERROR_HANDLER"); mode != "" { // the child
+		if want[mode] == "" {
+			t.Fatalf("unknown mode %q", mode)
+		}
 		var buf bytes.Buffer
 		slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
 		endpoint := ""
