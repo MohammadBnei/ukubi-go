@@ -1,9 +1,12 @@
 package errs
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -69,5 +72,24 @@ func TestIsBody(t *testing.T) {
 		if got != want || string(rest) != raw {
 			t.Errorf("%q: %v (body %q)", raw, got, rest)
 		}
+	}
+}
+
+// TestWriteLogs: an error outside the model is logged at ERROR, with today's words, through whatever handler slog's
+// default is (an app's JSON one); one of the model is not logged.
+func TestWriteLogs(t *testing.T) {
+	var buf bytes.Buffer
+	old, w, flags := slog.Default(), log.Writer(), log.Flags()
+	t.Cleanup(func() { slog.SetDefault(old); log.SetOutput(w); log.SetFlags(flags) }) // SetDefault(old) leaves log redirected
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	Write(httptest.NewRecorder(), errors.New("pq: connection refused"))
+	var m map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &m); err != nil || m["level"] != "ERROR" || m["msg"] != "internal error: pq: connection refused" {
+		t.Errorf("%s: %v", buf.Bytes(), err)
+	}
+	buf.Reset()
+	Write(httptest.NewRecorder(), Invalid(keyTest, "x"))
+	if buf.Len() != 0 {
+		t.Errorf("a model error is logged: %s", buf.Bytes()) // the positive control: the check sees a log line
 	}
 }

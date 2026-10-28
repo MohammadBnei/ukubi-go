@@ -11,8 +11,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 )
 
@@ -151,7 +152,7 @@ type Body struct {
 func Write(w http.ResponseWriter, err error) {
 	var e *Error
 	if !errors.As(err, &e) {
-		log.Printf("internal error: %v", err)
+		slog.Error(fmt.Sprintf("internal error: %v", err)) // ERROR, through whatever handler the app installed
 		e = of(Internal, KeyInternal, "something went wrong on the server (its log says what)")
 	}
 	h := w.Header()
