@@ -7,4 +7,5 @@ func Setenv(string, string) error           { return nil }
 func Unsetenv(string) error                 { return nil }
 func Clearenv()                             {}
 func Exec(string, []string, []string) error { return nil }
+func Getwd() (string, error)                { return "", nil }
 func Getpid() int                           { return 0 }

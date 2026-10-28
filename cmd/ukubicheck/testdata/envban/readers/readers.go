@@ -36,12 +36,14 @@ func values() {
 	_ = syscall.ForkExec          // want `^syscall\.ForkExec:`
 	_ = syscall.Exec              // want `^syscall\.Exec:`
 	_ = syscall.StartProcess      // want `^syscall\.StartProcess:`
+	_ = syscall.Getwd             // want `^syscall\.Getwd:`
 	_ = unix.Getenv               // want `^golang\.org/x/sys/unix\.Getenv:`
 	_ = unix.Environ              // want `^golang\.org/x/sys/unix\.Environ:`
 	_ = unix.Setenv               // want `^golang\.org/x/sys/unix\.Setenv:`
 	_ = unix.Unsetenv             // want `^golang\.org/x/sys/unix\.Unsetenv:`
 	_ = unix.Clearenv             // want `^golang\.org/x/sys/unix\.Clearenv:`
 	_ = unix.Exec                 // want `^golang\.org/x/sys/unix\.Exec:`
+	_ = unix.Getwd                // want `^golang\.org/x/sys/unix\.Getwd:`
 	_ = http.ProxyFromEnvironment // want `^net/http\.ProxyFromEnvironment:`
 }
 

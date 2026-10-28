@@ -42,12 +42,14 @@ var readers = map[string]bool{
 	"syscall.ForkExec":               true,
 	"syscall.Exec":                   true,
 	"syscall.StartProcess":           true,
+	"syscall.Getwd":                  true,
 	"golang.org/x/sys/unix.Getenv":   true,
 	"golang.org/x/sys/unix.Environ":  true,
 	"golang.org/x/sys/unix.Setenv":   true,
 	"golang.org/x/sys/unix.Unsetenv": true,
 	"golang.org/x/sys/unix.Clearenv": true,
 	"golang.org/x/sys/unix.Exec":     true,
+	"golang.org/x/sys/unix.Getwd":    true,
 	"net/http.ProxyFromEnvironment":  true,
 }
 

@@ -258,7 +258,11 @@ func tableUses(pass *analysis.Pass, f *ast.File) {
 			}
 			use = stack[i].(ast.Expr)
 		}
-		if climbed && !reference(info.TypeOf(use)) {
+		t := info.TypeOf(use)
+		if tu, ok := t.(*types.Tuple); ok { // v, ok := tbl[k]: the value is the tuple's first
+			t = tu.At(0).Type()
+		}
+		if climbed && !reference(t) {
 			return true // a copy
 		}
 		switch p := stack[i].(type) {

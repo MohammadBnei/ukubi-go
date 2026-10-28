@@ -16,7 +16,7 @@ import (
 // result for them). What analysistest cannot hold is held here: a file the build excludes (tags) is checked, an
 // excluded assembly file is skipped, and cgo is refused whether vet hands over cmd/cgo's rewrite (CGO_ENABLED=1) or
 // excludes the file (CGO_ENABLED=0), and cmd/cgo's rewrite of a user file is checked as the user's, not as generated.
-// An excluded test file is skipped. A clean package exits 0.
+// An excluded test file is skipped; a //line directive naming a test file does not skip a file. A clean package exits 0.
 func TestVettool(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "ukubicheck")
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
@@ -35,8 +35,13 @@ func TestVettool(t *testing.T) {
 		} else if err != nil {
 			t.Fatal(err)
 		}
+		abs, err := filepath.Abs(cmd.Dir)
+		if err != nil {
+			t.Fatal(err)
+		}
 		var lines []string
 		for _, l := range strings.Split(string(out), "\n") {
+			l = strings.TrimPrefix(l, abs+string(filepath.Separator)) // a //line name is printed absolute
 			if diag.MatchString(l) {
 				lines = append(lines, l)
 			} else if l != "" && !strings.HasPrefix(l, "# ") {
@@ -51,6 +56,7 @@ func TestVettool(t *testing.T) {
 		"bad/bad.go:16:9: os.Getenv: only the config file (-envban.allow) reads the environment",
 		"bad/bad.go:17:6: log.Print: give the line its level with slog (the log package is for -loglevel.wrappers)",
 		"bad/bad.go:18:6: a literal makes a key: a key is one of the registry's constants (-errkeys.registry)",
+		"bad/lined_test.go:5: os.Getenv: only the config file (-envban.allow) reads the environment", // //line names it, not a test
 		"bad/tagged.go:7:31: os.Getenv: only the config file (-envban.allow) reads the environment",
 		"cgo/cgo.go:2:1: cgo: only the config file (-envban.allow) reads the environment",
 	}
@@ -70,4 +76,4 @@ func TestVettool(t *testing.T) {
 	}
 }
 
-var diag = regexp.MustCompile(`^[\w/.-]+\.go:\d+:\d+: `)
+var diag = regexp.MustCompile(`^[\w/.-]+\.go:\d+(:\d+)?: `) // a //line position has no column

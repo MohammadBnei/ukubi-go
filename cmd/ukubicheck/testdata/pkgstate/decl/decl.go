@@ -52,10 +52,11 @@ var noReason = []int{1} // want `^noReason: //ukubicheck:table takes a reason` n
 //
 //ukubicheck:table the ints and the records
 var (
-	Lst  = []int{3, 1} // want Lst:"table"
-	ints = [2]int{1}   // want ints:"table"
-	recs = []rec{{}}   // want recs:"table"
-	tt   = T{1}        // want tt:"table"
+	Lst  = []int{3, 1}            // want Lst:"table"
+	ints = [2]int{1}              // want ints:"table"
+	recs = []rec{{}}              // want recs:"table"
+	tt   = T{1}                   // want tt:"table"
+	cnt  = map[string]int{"a": 1} // want cnt:"table"
 )
 
 type rec struct {
@@ -93,7 +94,9 @@ func misuse() []int {
 	_ = append(Lst, 1)     // want `^Lst is a table`
 	alias := Lst           // want `^Lst is a table`
 	el := tbl["a"]         // want `^tbl is a table`
-	_ = tt.M               // want `^tt is a table`
+	el2, ok := tbl["a"]    // want `^tbl is a table`
+	_, _ = el2, ok
+	_ = tt.M // want `^tt is a table`
 	_, _ = alias, el
 	return Lst // want `^Lst is a table`
 }
@@ -109,6 +112,9 @@ func reads() int {
 	_, _ = slices.Clone(Lst), maps.Clone(tbl)
 	_ = tbl == nil
 	r := recs[0]
+	if c, ok := cnt["a"]; ok { // a scalar through comma-ok: a copy
+		n += c
+	}
 	return n + r.n + len(noReason) + len(text) + len(raw) + plain + grouped + Exported + st.f + arr[0] + len(m)
 }
 
