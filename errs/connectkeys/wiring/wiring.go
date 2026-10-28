@@ -4,6 +4,10 @@
 //
 // It is syntactic, over the module's non-test files: it trusts names, not types (a typed check belongs in
 // ukubicheck). It skips testdata, vendor and directories starting with "." or "_", as the go tool does.
+//
+// It finds generated Connect handlers by layout: a package whose import path contains /proto/gen/ and ends in
+// "connect", as buf generates them. An app that generates elsewhere sees no handlers, so the check would pass
+// vacuously: a caller asserts handlers and servers are above zero.
 package wiring
 
 import (
@@ -28,6 +32,10 @@ const (
 // banned are connect's options that carry interceptors of their own, or options the check cannot see into.
 var banned = map[string]bool{"WithInterceptors": true, "WithHandlerOptions": true, "WithConditionalHandlerOptions": true, "WithOptions": true}
 
+// serverInterceptors are grpc's server options that install interceptors. grpc.With…Interceptor are dial options,
+// for clients, and are not checked.
+var serverInterceptors = map[string]bool{"UnaryInterceptor": true, "StreamInterceptor": true, "ChainUnaryInterceptor": true, "ChainStreamInterceptor": true}
+
 // Check walks the Go module at root. wrapper is the import path of the app's package that holds its *connectkeys.Keys
 // and exports WithInterceptors, UnaryServerInterceptor and StreamServerInterceptor, each returning that Keys' own.
 //
@@ -35,7 +43,8 @@ var banned = map[string]bool{"WithInterceptors": true, "WithHandlerOptions": tru
 // as its first option, exactly once, and otherwise only direct calls to connect's own With* options, none of which
 // carries interceptors (no connect.WithInterceptors, WithHandlerOptions, WithOptions, no spread). Every grpc.NewServer
 // opens with grpc.ChainUnaryInterceptor(wrapper.UnaryServerInterceptor(), …) and
-// grpc.ChainStreamInterceptor(wrapper.StreamServerInterceptor(), …), and no other grpc.*Interceptor call appears.
+// grpc.ChainStreamInterceptor(wrapper.StreamServerInterceptor(), …), and no other grpc server interceptor option
+// (UnaryInterceptor, StreamInterceptor, Chain…) appears; client dial options (grpc.With…Interceptor) are allowed.
 // handlers and servers count what it saw: a caller asserts they are above zero.
 func Check(root, wrapper string) (findings []string, handlers, servers int, err error) {
 	mod, err := module(root)
@@ -256,7 +265,7 @@ func checkFile(file *ast.File, wrapper string, add func(f string, a ...any)) (ha
 		if !ok || chained[c] {
 			return true
 		}
-		if path, name := sel(c.Fun); path == grpcPkg && strings.HasSuffix(name, "Interceptor") {
+		if path, name := sel(c.Fun); path == grpcPkg && serverInterceptors[name] {
 			add("grpc.%s outside the server's opening chains", name)
 		}
 		return true

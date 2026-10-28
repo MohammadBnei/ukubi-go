@@ -45,7 +45,8 @@ type detail struct {
 }
 
 // New is the keys for the given detail templates. It panics unless there is at least one and each has a singular
-// `string key = 1` and, if it has a field named source, a singular `string source = 2`. Other fields stay unset.
+// `string key = 1` and, if it has a field named source, a singular `string source = 2`, either outside any oneof
+// (proto3 `optional` is allowed). Other fields stay unset.
 func New(templates ...proto.Message) *Keys {
 	if len(templates) == 0 {
 		panic("connectkeys: New needs a detail template")
@@ -65,7 +66,7 @@ func New(templates ...proto.Message) *Keys {
 
 func field(md protoreflect.MessageDescriptor, name protoreflect.Name, num protoreflect.FieldNumber) protoreflect.FieldDescriptor {
 	f := md.Fields().ByName(name)
-	if f == nil || f.Number() != num || f.Kind() != protoreflect.StringKind || f.Cardinality() == protoreflect.Repeated || f.ContainingOneof() != nil {
+	if f == nil || f.Number() != num || f.Kind() != protoreflect.StringKind || f.Cardinality() == protoreflect.Repeated || (f.ContainingOneof() != nil && !f.ContainingOneof().IsSynthetic()) {
 		panic(fmt.Sprintf("connectkeys: %s needs a singular `string %s = %d`", md.FullName(), name, num))
 	}
 	return f

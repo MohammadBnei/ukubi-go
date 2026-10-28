@@ -106,6 +106,8 @@ func TestCheck(t *testing.T) {
 		{"empty chain", main(goodHandler, `grpc.NewServer(grpc.ChainUnaryInterceptor(), grpc.ChainStreamInterceptor(errkeys.StreamServerInterceptor()))`), "grpc.NewServer does not open"},
 		{"chains swapped", main(goodHandler, `grpc.NewServer(grpc.ChainUnaryInterceptor(errkeys.StreamServerInterceptor()), grpc.ChainStreamInterceptor(errkeys.StreamServerInterceptor()))`), "grpc.NewServer does not open"},
 		{"spread server", main(goodHandler, `grpc.NewServer(opts...)`), "grpc.NewServer does not open"},
+		{"client interceptor", main(goodHandler, goodServer, `_ = grpc.WithChainUnaryInterceptor(nil)`, `_ = grpc.WithUnaryInterceptor(nil)`, `_ = grpc.WithStreamInterceptor(nil)`), ""},
+		{"stray chain", main(goodHandler, goodServer, `_ = grpc.ChainStreamInterceptor(nil)`), "grpc.ChainStreamInterceptor outside the server's opening chains"},
 		{"stray interceptor", main(goodHandler, goodServer, `_ = grpc.UnaryInterceptor(nil)`), "grpc.UnaryInterceptor outside the server's opening chains"},
 		{"wrapper forwards to connect", map[string]string{"internal/errkeys/errkeys.go": strings.Replace(goodWrapper,
 			"return keys.WithInterceptors(ics...)", "return connect.WithInterceptors(ics...)", 1)}, "wrapper WithInterceptors does not return"},

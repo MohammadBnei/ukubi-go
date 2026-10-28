@@ -1,7 +1,6 @@
 package connectkeys
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/types/descriptorpb"
@@ -45,6 +46,26 @@ func msg(t testing.TB, pkg string, fields ...*fd) proto.Message {
 	f, err := protodesc.NewFile(&descriptorpb.FileDescriptorProto{
 		Name: proto.String(strings.ReplaceAll(pkg, ".", "/") + "/errors.proto"), Package: proto.String(pkg), Syntax: proto.String("proto3"),
 		MessageType: []*descriptorpb.DescriptorProto{{Name: proto.String("ErrorKey"), Field: fields}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dynamicpb.NewMessage(f.Messages().Get(0))
+}
+
+// oneof is {string key = 1; oneof o { string source = 2; }}, or with synthetic, proto3 `optional string source = 2`.
+func oneof(t testing.TB, synthetic bool) proto.Message {
+	t.Helper()
+	src := str("source", 2)
+	src.OneofIndex, src.Proto3Optional = proto.Int32(0), proto.Bool(synthetic)
+	name := "o"
+	if synthetic {
+		name = "_source"
+	}
+	f, err := protodesc.NewFile(&descriptorpb.FileDescriptorProto{
+		Name: proto.String("o/v1/errors.proto"), Package: proto.String("o.v1"), Syntax: proto.String("proto3"),
+		MessageType: []*descriptorpb.DescriptorProto{{Name: proto.String("ErrorKey"), Field: []*fd{str("key", 1), src},
+			OneofDecl: []*descriptorpb.OneofDescriptorProto{{Name: proto.String(name)}}}},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -97,6 +118,24 @@ func TestConstructors(t *testing.T) {
 	_ = k.Status(codes.OK, KeyInternal, "")
 }
 
+// sameFields: a and b hold the same field records, in any order. The test templates are dynamicpb, which marshals
+// fields in map order; generated ErrorKeys marshal in field order (the proof's golden pins those bytes).
+func sameFields(a, b []byte) bool {
+	split := func(b []byte) []string {
+		var out []string
+		for len(b) > 0 {
+			_, _, n := protowire.ConsumeField(b)
+			if n < 0 {
+				return nil
+			}
+			out, b = append(out, string(b[:n])), b[n:]
+		}
+		slices.Sort(out)
+		return out
+	}
+	return slices.Equal(split(a), split(b))
+}
+
 // TestBytes: the detail is exactly field 1 = key, field 2 = source, the bytes fleet's and the bridge's ErrorKey send
 // (and islands/src/errors.test.ts decodes by hand); with no source, field 1 alone.
 func TestBytes(t *testing.T) {
@@ -109,14 +148,14 @@ func TestBytes(t *testing.T) {
 		}
 		return b
 	}
-	if got := k.Sourced(connect.CodeUnavailable, "store.unavailable", "store", nil).Details()[0].Bytes(); !bytes.Equal(got, enc("store.unavailable", "store")) {
+	if got := k.Sourced(connect.CodeUnavailable, "store.unavailable", "store", nil).Details()[0].Bytes(); !sameFields(got, enc("store.unavailable", "store")) {
 		t.Errorf("sourced: %x", got)
 	}
-	if got := k.Connect(connect.CodeUnknown, KeyInternal, nil).Details()[0].Bytes(); !bytes.Equal(got, enc("server.internal")) {
+	if got := k.Connect(connect.CodeUnknown, KeyInternal, nil).Details()[0].Bytes(); !sameFields(got, enc("server.internal")) {
 		t.Errorf("connect: %x", got)
 	}
 	s, _ := status.FromError(k.Status(codes.Unknown, KeyInternal, "x"))
-	if a := s.Proto().GetDetails(); len(a) != 1 || a[0].GetTypeUrl() != "type.googleapis.com/test.v1.ErrorKey" || !bytes.Equal(a[0].GetValue(), enc("server.internal")) {
+	if a := s.Proto().GetDetails(); len(a) != 1 || a[0].GetTypeUrl() != "type.googleapis.com/test.v1.ErrorKey" || !sameFields(a[0].GetValue(), enc("server.internal")) {
 		t.Errorf("grpc: %v", a)
 	}
 }
@@ -163,6 +202,8 @@ func TestNew(t *testing.T) {
 			return []proto.Message{msg(t, "a.v1", f)}
 		}, true},
 		{"source = 3", func() []proto.Message { return []proto.Message{msg(t, "a.v1", str("key", 1), str("source", 3))} }, true},
+		{"source in a oneof", func() []proto.Message { return []proto.Message{oneof(t, false)} }, true},
+		{"optional source", func() []proto.Message { return []proto.Message{oneof(t, true)} }, false},
 		{"second bad", func() []proto.Message { return []proto.Message{fleetLike(t, "a.v1"), msg(t, "b.v1", str("k", 1))} }, true},
 		{"key only", func() []proto.Message { return []proto.Message{msg(t, "a.v1", str("key", 1))} }, false},
 		{"extra field", func() []proto.Message {
