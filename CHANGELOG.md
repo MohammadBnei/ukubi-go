@@ -5,13 +5,13 @@
 ### Features
 
 - **pkg:** The error model as a nested module, mountain/pkg
-- **pkg:** Pkg/telemetry, the game's traces moved unchanged
+- **pkg:** pkg/telemetry, the game's traces moved unchanged
 - **pkg:** NewLogger, JSON lines with trace ids; errs.Write logs at ERROR
 - Carry errs and telemetry from mountain pkg/ at a53488e576e5c8845183197d9ce4331ce5db4a38
 - **telemetry:** Export failures log at WARN
-- **errs:** Connectkeys, Connect/gRPC error keys with an outermost fallback interceptor (#2)
-- **proto:** Ukubi.errors.v1.ErrorKey with buf lint, breaking and drift checks (#3)
-- **ukubicheck:** Go/analysis analyzer for env reads, error keys, package state and log levels (#4)
+- **errs:** connectkeys, Connect/gRPC error keys with an outermost fallback interceptor (#2)
+- **proto:** ukubi.errors.v1.ErrorKey with buf lint, breaking and drift checks (#3)
+- **ukubicheck:** go/analysis analyzer for env reads, error keys, package state and log levels (#4)
 
 ### Fixes
 
@@ -21,11 +21,9 @@
 ### Other
 
 - Bootstrap ukubi-go with README, MIT license and .gitignore
-- Golangci-lint, go test -race and a trailer check
+- golangci-lint, go test -race and a trailer check
 - Module path github.com/MohammadBnei/ukubi-go
-- Go vet, go test -race and gofmt on GitHub-hosted runners
+- go vet, go test -race and gofmt on GitHub-hosted runners
 - List the errs and telemetry packages with their import paths
 - **telemetry:** Say what a second SetErrorHandler does
 - **telemetry:** Drop the private standard reference from the error handler doc
-
-
