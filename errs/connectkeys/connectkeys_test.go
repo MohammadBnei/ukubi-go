@@ -233,6 +233,11 @@ func TestTwoDetails(t *testing.T) {
 		"fallback": both.withConnectKey(errors.New("raw")),
 		"grpc":     both.Status(codes.Aborted, keyChanged, "x"),
 		"gfall":    both.withStatusKey(errors.New("raw")),
+		// An error keyed by the old template alone, or the new one's detail with an empty key, gains (or has replaced)
+		// the new one, keeping the key and source.
+		"old only": both.withConnectKey(New(old).Sourced(connect.CodeAborted, keyChanged, "store", nil)),
+		"g old":    both.withStatusKey(New(old).Status(codes.Aborted, keyChanged, "x")),
+		"empty":    both.withConnectKey(both.withConnectKey(New(shared, old).Connect(connect.CodeAborted, "", nil))),
 	} {
 		var names []string
 		var ce *connect.Error
@@ -245,6 +250,9 @@ func TestTwoDetails(t *testing.T) {
 			for _, a := range s.Proto().GetDetails() {
 				names = append(names, a.GetTypeUrl()[len("type.googleapis.com/"):])
 			}
+		}
+		if key, src, _ := New(shared).keyed(err); name == "old only" && (key != keyChanged || src != "store") {
+			t.Errorf("old only: key %q source %q", key, src)
 		}
 		if strings.Join(names, ",") != "old.v1.ErrorKey,ukubi.errors.v1.ErrorKey" {
 			t.Errorf("%s: details %v", name, names)

@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -72,30 +73,36 @@ func field(md protoreflect.MessageDescriptor, name protoreflect.Name, num protor
 	return f
 }
 
-func (k *Keys) msgs(key errs.Key, source string) []proto.Message {
-	out := make([]proto.Message, 0, len(k.details))
-	for _, d := range k.details {
-		m := d.typ.New()
-		m.Set(d.key, protoreflect.ValueOfString(string(key)))
-		if source != "" {
-			if d.source == nil {
-				panic(fmt.Sprintf("connectkeys: %s has no source field for %q", d.name, source))
-			}
-			m.Set(d.source, protoreflect.ValueOfString(source))
-		}
-		out = append(out, m.Interface())
+// msg is d's detail for key and source; a template without a source field drops it.
+func (d detail) msg(key errs.Key, source string) proto.Message {
+	m := d.typ.New()
+	m.Set(d.key, protoreflect.ValueOfString(string(key)))
+	if source != "" && d.source != nil {
+		m.Set(d.source, protoreflect.ValueOfString(source))
 	}
-	return out
+	return m.Interface()
 }
 
-func (k *Keys) addConnect(e *connect.Error, key errs.Key, source string) {
-	for _, m := range k.msgs(key, source) {
-		d, err := connect.NewErrorDetail(m)
+func addConnect(e *connect.Error, ds []detail, key errs.Key, source string) {
+	for _, d := range ds {
+		cd, err := connect.NewErrorDetail(d.msg(key, source))
 		if err != nil {
 			panic(err) // a two-string message always marshals
 		}
-		e.AddDetail(d)
+		e.AddDetail(cd)
 	}
+}
+
+func anys(ds []detail, key errs.Key, source string) []*anypb.Any {
+	out := make([]*anypb.Any, 0, len(ds))
+	for _, d := range ds {
+		a, err := anypb.New(d.msg(key, source))
+		if err != nil {
+			panic(err)
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 // Connect is Connect's error for code with err's words, keyed.
@@ -106,8 +113,13 @@ func (k *Keys) Connect(code connect.Code, key errs.Key, err error) *connect.Erro
 // Sourced is Connect, with the source whose words err holds. It panics on a non-empty source when a template has no
 // source field, rather than drop it.
 func (k *Keys) Sourced(code connect.Code, key errs.Key, source string, err error) *connect.Error {
+	for _, d := range k.details {
+		if source != "" && d.source == nil {
+			panic(fmt.Sprintf("connectkeys: %s has no source field for %q", d.name, source))
+		}
+	}
 	e := connect.NewError(code, err)
-	k.addConnect(e, key, source)
+	addConnect(e, k.details, key, source)
 	return e
 }
 
@@ -116,56 +128,74 @@ func (k *Keys) Status(code codes.Code, key errs.Key, msg string) error {
 	if code == codes.OK {
 		panic("connectkeys: Status with codes.OK")
 	}
-	return k.withStatus(status.New(code, msg), key)
-}
-
-func (k *Keys) withStatus(s *status.Status, key errs.Key) error {
-	p := s.Proto()
-	for _, m := range k.msgs(key, "") {
-		a, err := anypb.New(m)
-		if err != nil {
-			panic(err)
-		}
-		p.Details = append(p.Details, a)
-	}
+	p := status.New(code, msg).Proto()
+	p.Details = append(p.Details, anys(k.details, key, "")...)
 	return status.FromProto(p).Err()
 }
 
-// Of is the key an error carries, Connect's or gRPC's, or "" without one. It matches the templates by full name and
-// needs no entry in the global proto registry.
+// Of is the key an error carries, Connect's or gRPC's, or "" without one: the first template's, in New's order, whose
+// detail it carries with a non-empty key. It matches the templates by full name and needs no entry in the global proto
+// registry.
 func (k *Keys) Of(err error) errs.Key {
+	key, _, _ := k.keyed(err)
+	return key
+}
+
+// keyed is Of with the source beside the key, and the templates err lacks a keyed detail for.
+func (k *Keys) keyed(err error) (key errs.Key, source string, lack []detail) {
+	for i, m := range k.found(err) {
+		d := k.details[i]
+		switch {
+		case m == nil:
+			lack = append(lack, d)
+		case key == "":
+			key = errs.Key(m.Get(d.key).String())
+			if d.source != nil {
+				source = m.Get(d.source).String()
+			}
+		}
+	}
+	return key, source, lack
+}
+
+// found is, per template, the first detail of its type err carries, as a client reads it; nil when there is none, it
+// does not unmarshal or its key is empty.
+func (k *Keys) found(err error) []protoreflect.Message {
+	got := make([]protoreflect.Message, len(k.details))
+	seen := make([]bool, len(k.details))
+	visit := func(name string, b []byte) {
+		for i, d := range k.details {
+			if d.name != name || seen[i] {
+				continue
+			}
+			seen[i] = true
+			m := d.typ.New()
+			if proto.Unmarshal(b, m.Interface()) == nil && m.Get(d.key).String() != "" {
+				got[i] = m
+			}
+		}
+	}
 	var ce *connect.Error
 	if errors.As(err, &ce) {
 		for _, d := range ce.Details() {
-			if key, ok := k.read(d.Type(), d.Bytes()); ok {
-				return key
-			}
+			visit(d.Type(), d.Bytes())
 		}
-		return ""
-	}
-	if s, ok := status.FromError(err); ok && err != nil {
+	} else if s, ok := status.FromError(err); ok {
 		for _, a := range s.Proto().GetDetails() {
-			u := a.GetTypeUrl()
-			if key, ok := k.read(u[strings.LastIndex(u, "/")+1:], a.GetValue()); ok {
-				return key
-			}
+			visit(typeName(a), a.GetValue())
 		}
 	}
-	return ""
+	return got
 }
 
-func (k *Keys) read(name string, b []byte) (errs.Key, bool) {
-	for _, d := range k.details {
-		if d.name != name {
-			continue
-		}
-		m := d.typ.New()
-		if proto.Unmarshal(b, m.Interface()) != nil {
-			return "", false
-		}
-		return errs.Key(m.Get(d.key).String()), true
-	}
-	return "", false
+func typeName(a *anypb.Any) string {
+	u := a.GetTypeUrl()
+	return u[strings.LastIndex(u, "/")+1:]
+}
+
+// has: one of ds is the template named name.
+func has(ds []detail, name string) bool {
+	return slices.ContainsFunc(ds, func(d detail) bool { return d.name == name })
 }
 
 // WithInterceptors is a Connect handler's interceptors, ics, behind the fallback: outermost, it keys an error the
@@ -194,9 +224,18 @@ func (a keyAll) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.
 	}
 }
 
+// withConnectKey gives err the details it lacks, keyed as its other details are, else KeyInternal. A lacking
+// template's own details (an empty key, unreadable bytes) are replaced, so a client reading the first finds the key.
 func (k *Keys) withConnectKey(err error) error {
-	if err == nil || k.Of(err) != "" {
+	if err == nil {
+		return nil
+	}
+	key, source, lack := k.keyed(err)
+	if len(lack) == 0 {
 		return err
+	}
+	if key == "" {
+		key = KeyInternal
 	}
 	var ce *connect.Error
 	if !errors.As(err, &ce) {
@@ -208,12 +247,14 @@ func (k *Keys) withConnectKey(err error) error {
 	src := *ce
 	e := connect.NewError(src.Code(), src.Unwrap())
 	for _, d := range src.Details() {
-		e.AddDetail(d)
+		if !has(lack, d.Type()) {
+			e.AddDetail(d)
+		}
 	}
 	for key, v := range src.Meta() {
 		e.Meta()[key] = append([]string(nil), v...)
 	}
-	k.addConnect(e, KeyInternal, "")
+	addConnect(e, lack, key, source)
 	return e
 }
 
@@ -244,16 +285,27 @@ func (k *Keys) StreamServerInterceptor() grpc.StreamServerInterceptor {
 	}
 }
 
+// withStatusKey is withConnectKey over gRPC.
 func (k *Keys) withStatusKey(err error) error {
-	if err == nil || k.Of(err) != "" {
+	if err == nil {
+		return nil
+	}
+	key, source, lack := k.keyed(err)
+	if len(lack) == 0 {
 		return err
+	}
+	if key == "" {
+		key = KeyInternal
 	}
 	s, ok := status.FromError(err)
 	if !ok {
 		s = status.FromContextError(err) // a plain error: a context error's code, else Unknown, as gRPC would answer
 	}
 	if s.Code() == codes.OK {
-		return err // an OK status carries no detail; never reached for a non-nil error
+		return err // an error whose GRPCStatus() is OK: a status built from it would be nil, dropping the error
 	}
-	return k.withStatus(s, KeyInternal)
+	p := s.Proto()
+	p.Details = slices.DeleteFunc(p.Details, func(a *anypb.Any) bool { return has(lack, typeName(a)) })
+	p.Details = append(p.Details, anys(lack, key, source)...)
+	return status.FromProto(p).Err()
 }
