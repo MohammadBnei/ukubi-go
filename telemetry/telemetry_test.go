@@ -1,10 +1,17 @@
 package telemetry
 
 import (
+	"bytes"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"strings"
 	"testing"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -67,5 +74,40 @@ func TestSpans(t *testing.T) {
 	}
 	if v, ok := s.Resource.Set().Value("service.name"); !ok || v.AsString() != "ukubi-game" {
 		t.Errorf("service.name: %v", v)
+	}
+}
+
+// TestErrorHandler: with an endpoint, New sends every OTel error to slog at WARN, msg "traces" (standard §7); without
+// one it sets nothing, and OTel's default prints the error through the log package, which slog.SetDefault turns into
+// an INFO line. Each case runs in its own process: OTel keeps the first handler set, and TestNone sets one already.
+func TestErrorHandler(t *testing.T) {
+	want := map[string]string{
+		"endpoint": `level=WARN msg=traces err="export refused"`,
+		"none":     `level=INFO msg="export refused"`,
+	}
+	if mode := os.Getenv("TELEMETRY_ERROR_HANDLER"); mode != "" { // the child
+		var buf bytes.Buffer
+		slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+		endpoint := ""
+		if mode == "endpoint" {
+			endpoint = "http://127.0.0.1:1/v1/traces" // never dialled: no span is started
+		}
+		tr, err := New(endpoint, "x")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tr.Shutdown() }()
+		otel.Handle(errors.New("export refused"))
+		if !strings.Contains(buf.String(), want[mode]) {
+			t.Fatalf("%s: logged %q, want %s", mode, buf.String(), want[mode])
+		}
+		return
+	}
+	for mode := range want {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestErrorHandler$", "-test.count=1")
+		cmd.Env = append(os.Environ(), "TELEMETRY_ERROR_HANDLER="+mode)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Errorf("%s: %v\n%s", mode, err, out)
+		}
 	}
 }
