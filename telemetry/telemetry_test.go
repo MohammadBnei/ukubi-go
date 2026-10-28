@@ -77,7 +77,7 @@ func TestSpans(t *testing.T) {
 	}
 }
 
-// TestErrorHandler: with an endpoint, New sends every OTel error to slog at WARN, msg "traces" (standard §7); without
+// TestErrorHandler: with an endpoint, New sends every OTel error to slog at WARN, msg "traces"; without
 // one it sets nothing, and OTel's default prints the error through the log package, which slog.SetDefault turns into
 // an INFO line. Each case runs in its own process: the none case needs a process where no handler was ever set, and
 // TestNone sets one already.

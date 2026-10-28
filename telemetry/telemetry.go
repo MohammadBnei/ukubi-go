@@ -4,7 +4,7 @@
 //
 // Everything that decides a span is passed explicitly (the provider, the propagator, a no-op meter for otelhttp's own
 // metrics, so no series is added anywhere), so a test can trace one router without touching another. The one OTel
-// global set is the error handler, and only by New with an endpoint (standard §7): from then on every error the
+// global set is the error handler, and only by New with an endpoint: from then on every error the
 // process reports through otel.Handle (a failed trace export, but also a metrics exporter's or reader's errors) is one
 // slog line at WARN, msg "traces", with the error as err. A later SetErrorHandler replaces it for otel.Handle; a
 // handler fetched before the first set keeps delegating to this first one.
