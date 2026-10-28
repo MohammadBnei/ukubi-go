@@ -32,7 +32,7 @@ func TestNone(t *testing.T) {
 	if err != nil || tr.tp == nil {
 		t.Errorf("an endpoint: %v", err) // the positive control: an endpoint makes a tracer (export happens later)
 	}
-	tr.Shutdown()
+	_ = tr.Shutdown()
 }
 
 // TestSpans: with tracing, a request gets one server span named by its route's pattern, and the answer is the

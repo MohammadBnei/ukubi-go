@@ -159,13 +159,13 @@ func Write(w http.ResponseWriter, err error) {
 	h.Set("Content-Type", "application/json")
 	h.Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(e.Code.Status())
-	json.NewEncoder(w).Encode(Body{Code: e.Code, Key: string(e.Key), Message: e.Say, Source: e.Source, Detail: e.Detail})
+	_ = json.NewEncoder(w).Encode(Body{Code: e.Code, Key: string(e.Key), Message: e.Say, Source: e.Source, Detail: e.Detail})
 }
 
 // IsBody: resp's body is an error of the model (IsModel). The body is read and put back.
 func IsBody(resp *http.Response) bool {
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	resp.Body = io.NopCloser(bytes.NewReader(b))
 	return err == nil && IsModel(b)
 }
