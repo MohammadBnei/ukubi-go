@@ -34,10 +34,14 @@ const (
 
 // banned are connect's options that carry interceptors of their own, options the check cannot see into, and
 // WithRequestGate, whose gates run before the interceptors, so their errors skip the fallback.
+//
+//ukubicheck:table connect's options the wrapper check refuses
 var banned = map[string]bool{"WithInterceptors": true, "WithHandlerOptions": true, "WithConditionalHandlerOptions": true, "WithOptions": true, "WithRequestGate": true}
 
 // serverInterceptors are grpc's server options that install interceptors. grpc.With…Interceptor are dial options,
 // for clients, and are not checked.
+//
+//ukubicheck:table grpc's server options that install interceptors
 var serverInterceptors = map[string]bool{"UnaryInterceptor": true, "StreamInterceptor": true, "ChainUnaryInterceptor": true, "ChainStreamInterceptor": true}
 
 // Check walks the Go module at root. wrapper is the import path of the app's package that holds its *connectkeys.Keys

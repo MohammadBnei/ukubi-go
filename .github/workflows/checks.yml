@@ -17,6 +17,13 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go vet ./...
+      # -vettool replaces vet's own analyzers, so it runs beside go vet ./..., not instead. A fresh GOCACHE: vet's cache
+      # key leaves out the files the build excludes, which envban reads. errkeys is off: ukubi-go is the model, not an
+      # app, and its library keys (errs.KeyInternal, connectkeys.KeyInternal, errs.From's "source.code") have no registry.
+      - name: ukubicheck (dogfood)
+        run: |
+          go build -o "$RUNNER_TEMP/ukubicheck" ./cmd/ukubicheck
+          GOCACHE="$RUNNER_TEMP/vetcache" go vet -vettool="$RUNNER_TEMP/ukubicheck" -errkeys=false ./...
       - run: go test -race ./...
       - name: gofmt
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
