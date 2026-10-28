@@ -20,3 +20,51 @@ jobs:
       - run: go test -race ./...
       - name: gofmt
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+  buf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # buf breaking reads the base: the PR's base branch, or main's previous commit
+      # setup_only: the action's default would also lint, format, break and, on push to main, push to the BSR.
+      - uses: bufbuild/buf-action@v1.6.0
+        with:
+          setup_only: true
+          version: 1.72.0
+      - name: buf lint
+        working-directory: proto
+        run: buf lint
+      - name: buf breaking (against the base)
+        working-directory: proto
+        env:
+          # A PR: its real base branch, so a stacked PR is checked against the PR under it. A push to main: where main was.
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+        run: |
+          # A missing base must fail, never read as "no proto/ on the base yet".
+          git rev-parse --verify -q "$BASE^{commit}" >/dev/null || { echo "::error::base $BASE not fetched"; exit 1; }
+          # A deliberate break opts out by saying so (Conventional Commits footer), visibly, and only in a commit that
+          # touches proto/ (the "-- ." below): a footer about a Go API break elsewhere in the PR does not count.
+          if git log --format='%B' "$BASE..HEAD" -- . | grep -q '^BREAKING CHANGE:'; then
+            echo "::notice::skipping buf breaking: a commit touching proto/ declares BREAKING CHANGE:"
+            exit 0
+          fi
+          if git cat-file -e "$BASE:proto" 2>/dev/null; then
+            buf breaking --against "../.git#ref=$BASE,subdir=proto"
+          else
+            echo "no proto/ on $BASE yet, nothing to break against"
+          fi
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: buf generate
+        working-directory: proto
+        run: buf generate --clean
+      # status, not diff: it also catches generated files that are new (untracked) or gone.
+      - name: generated code is committed
+        run: |
+          if [ -n "$(git status --porcelain -- proto/gen)" ]; then
+            echo "::error::proto/gen is out of date with proto/. Run (cd proto && buf generate --clean) and commit."
+            git status --porcelain -- proto/gen
+            exit 1
+          fi
