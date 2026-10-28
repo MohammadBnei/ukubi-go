@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"path/filepath"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -45,6 +46,7 @@ func values() {
 	_ = unix.Exec                 // want `^golang\.org/x/sys/unix\.Exec:`
 	_ = unix.Getwd                // want `^golang\.org/x/sys/unix\.Getwd:`
 	_ = http.ProxyFromEnvironment // want `^net/http\.ProxyFromEnvironment:`
+	_ = filepath.Abs              // want `^path/filepath\.Abs:`
 }
 
 func call() string { return os.Getenv("HOME") } // want `^os\.Getenv:`

@@ -13,7 +13,8 @@ import (
 )
 
 // readers read or change the process's environment, or hand it on (a nil Env inherits it): the standard's §5 list,
-// the fleet core's env_test.go list plus unix.Exec and ioutil's temp files (TMPDIR).
+// the fleet core's env_test.go list plus unix.Exec, ioutil's temp files (TMPDIR) and
+// filepath.Abs (it reads the working directory through os.Getwd).
 //
 //ukubicheck:table the env readers envban refuses
 var readers = map[string]bool{
@@ -51,6 +52,7 @@ var readers = map[string]bool{
 	"golang.org/x/sys/unix.Exec":     true,
 	"golang.org/x/sys/unix.Getwd":    true,
 	"net/http.ProxyFromEnvironment":  true,
+	"path/filepath.Abs":              true,
 }
 
 // whole are the packages refused whole: os/exec (and its drop-in execabs) reads PATH and hands the environment on,

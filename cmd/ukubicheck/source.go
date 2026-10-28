@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/types/typeutil"
 )
 
 // cgoHeader heads the files cmd/cgo writes. go vet hands an analyzer a cgo package's user files rewritten by cmd/cgo
@@ -34,10 +35,14 @@ func sources(pass *analysis.Pass) []source {
 		case "_cgo_gotypes.go", "_cgo_import.go":
 			continue
 		}
-		cgo := len(f.Comments) > 0 && f.Comments[0].List[0].Text == cgoHeader
 		// The real name: a hand-written //line x_test.go:1 must not rename a file into a test or an allowed one. Only
-		// cmd/cgo's rewrite is named through its //line directives, so x.cgo1.go is x.go.
-		name := pass.Fset.PositionFor(f.Package, cgo).Filename
+		// cmd/cgo's rewrite (named x.cgo1.go, with its header: a hand-written header alone does not count) is named
+		// through its //line directives, so x.cgo1.go is x.go.
+		name := pass.Fset.PositionFor(f.Package, false).Filename
+		cgo := strings.HasSuffix(name, ".cgo1.go") && len(f.Comments) > 0 && f.Comments[0].List[0].Text == cgoHeader
+		if cgo {
+			name = pass.Fset.PositionFor(f.Package, true).Filename
+		}
 		out = append(out, source{File: f, name: name, rel: relFile(pass, name), test: strings.HasSuffix(name, "_test.go"),
 			gen: ast.IsGenerated(f) && !cgo, cgo: cgo})
 	}
@@ -100,20 +105,7 @@ func funcOf(info *types.Info, e ast.Expr) *types.Func {
 	if !ok {
 		return nil
 	}
-	var id *ast.Ident
-	switch f := ast.Unparen(c.Fun).(type) {
-	case *ast.Ident:
-		id = f
-	case *ast.SelectorExpr:
-		id = f.Sel
-	case *ast.IndexExpr: // f[T](...)
-		if s, ok := f.X.(*ast.SelectorExpr); ok {
-			id = s.Sel
-		} else {
-			id, _ = f.X.(*ast.Ident)
-		}
-	}
-	fn, _ := info.Uses[id].(*types.Func)
+	fn := typeutil.StaticCallee(info, c) // f(...), pkg.F(...), f[T](...), f[A, B](...)
 	if fn == nil || fn.Pkg() == nil || fn.Signature().Recv() != nil {
 		return nil
 	}

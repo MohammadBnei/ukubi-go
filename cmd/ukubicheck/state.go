@@ -28,6 +28,12 @@ var made = map[string]bool{
 //ukubicheck:table the functions a table may be given to
 var readOnly = map[string]bool{"slices.Contains": true, "slices.Index": true, "slices.Clone": true, "maps.Clone": true}
 
+// clones are the readOnly functions that copy one level only: a table may be given to them only when its elements
+// (and keys) hold no slice, map or pointer, since the clone would share those.
+//
+//ukubicheck:table the shallow copiers among readOnly
+var clones = map[string]bool{"slices.Clone": true, "maps.Clone": true}
+
 // tableFact marks a table, so the packages that import it check their reads too.
 type tableFact struct{}
 
@@ -36,7 +42,7 @@ func (*tableFact) String() string { return "table" }
 
 // pkgState: the module holds no mutable package-level state (standard §4, §11; ukubi-game TestPackageState). In
 // non-test, non-generated files:
-//   - every package-level variable is the blank _, an embed (into a string or an embed.FS, never a []byte), a value made
+//   - every package-level variable is the blank _ (its value calling no function: a conversion or a builtin only), an embed (into a string or an embed.FS, never a []byte), a value made
 //     by one of made, or a table (//ukubicheck:table <reason>);
 //   - no func init();
 //   - nothing writes a package-level variable of the module: an assignment, a range's key or value, ++ or --, &, or
@@ -62,6 +68,9 @@ func pkgState() *analysis.Analyzer {
 		for _, s := range srcs {
 			declarations(pass, s.File)
 		}
+		if pass.Module.Version != "" {
+			return nil, nil // a dependency module, visited for its table facts only: its writes are not this module's
+		}
 		mod := pass.Module.Path
 		for _, s := range srcs {
 			writes(pass, s.File, func(p *types.Package) bool { return p.Path() == mod || strings.HasPrefix(p.Path(), mod+"/") })
@@ -84,8 +93,16 @@ func declarations(pass *analysis.Pass, f *ast.File) {
 		for _, sp := range g.Specs {
 			vs := sp.(*ast.ValueSpec)
 			for i, id := range vs.Names {
+				if id.Name == "_" {
+					if i < len(vs.Values) {
+						if call := calls(pass.TypesInfo, vs.Values[i]); call != nil {
+							pass.Reportf(call.Pos(), "var _ = a call runs at package init like func init(): main builds every dependency and passes it in")
+						}
+					}
+					continue
+				}
 				obj := pass.TypesInfo.Defs[id]
-				if id.Name == "_" || obj == nil {
+				if obj == nil {
 					continue
 				}
 				if reason, ok := directive(tableDirective, g.Doc, vs.Doc); ok {
@@ -107,6 +124,21 @@ func declarations(pass *analysis.Pass, f *ast.File) {
 			}
 		}
 	}
+}
+
+// calls is the first call in e that is not a conversion or a builtin's, or nil.
+func calls(info *types.Info, e ast.Expr) (call *ast.CallExpr) {
+	ast.Inspect(e, func(n ast.Node) bool {
+		c, ok := n.(*ast.CallExpr)
+		if !ok || call != nil {
+			return call == nil
+		}
+		if tv := info.Types[c.Fun]; !tv.IsType() && !tv.IsBuiltin() {
+			call = c
+		}
+		return call == nil
+	})
+	return call
 }
 
 // directive is the text after a //name directive in docs, and whether there is one.
@@ -278,13 +310,42 @@ func tableUses(pass *analysis.Pass, f *ast.File) {
 					return true
 				}
 			}
-			if fn := funcOf(info, p); fn != nil && readOnly[fullName(fn)] && p.Fun != use {
+			if fn := funcOf(info, p); fn != nil && readOnly[fullName(fn)] && p.Fun != use && (!clones[fullName(fn)] || flatElems(t)) {
 				return true
 			}
 		}
 		pass.Reportf(use.Pos(), "%s is a table: it is only read (indexed, ranged over, compared, len, cap, slices.Contains, slices.Index, slices.Clone, maps.Clone)", v.Name())
 		return true
 	})
+}
+
+// flatElems: t's elements (and a map's keys) hold no slice, map or pointer, so a one-level copy of t shares nothing.
+func flatElems(t types.Type) bool {
+	switch u := t.Underlying().(type) {
+	case *types.Slice:
+		return flat(u.Elem())
+	case *types.Map:
+		return flat(u.Key()) && flat(u.Elem())
+	}
+	return false
+}
+
+// flat: a value of t holds no slice, map, pointer, interface, chan or func.
+func flat(t types.Type) bool {
+	switch u := t.Underlying().(type) {
+	case *types.Basic:
+		return u.Kind() != types.UnsafePointer
+	case *types.Array:
+		return flat(u.Elem())
+	case *types.Struct:
+		for i := range u.NumFields() {
+			if !flat(u.Field(i).Type()) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // reference: a value of t can write what it was read from.

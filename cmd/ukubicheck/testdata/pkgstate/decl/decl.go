@@ -34,6 +34,12 @@ var files embed.FS
 
 var _ = 1
 
+var _ any = (*rec)(nil)
+
+var _ = len("ab")
+
+var _ = func() int { return 0 }() // want `^var _ = a call runs at package init like func init\(\)`
+
 var errX = errors.New("x")
 
 var keys = connectkeys.New()
@@ -96,7 +102,9 @@ func misuse() []int {
 	el := tbl["a"]         // want `^tbl is a table`
 	el2, ok := tbl["a"]    // want `^tbl is a table`
 	_, _ = el2, ok
-	_ = tt.M // want `^tt is a table`
+	_ = tt.M               // want `^tt is a table`
+	_ = maps.Clone(tbl)    // want `^tbl is a table`
+	_ = slices.Clone(recs) // want `^recs is a table`
 	_, _ = alias, el
 	return Lst // want `^Lst is a table`
 }
@@ -109,7 +117,8 @@ func reads() int {
 		n += v
 	}
 	_, _ = slices.Contains(Lst, 1), slices.Index(Lst, 1)
-	_, _ = slices.Clone(Lst), maps.Clone(tbl)
+	_, _ = slices.Clone(Lst), maps.Clone(cnt)
+	_ = slices.Contains[[]int, int](Lst, 1)
 	_ = tbl == nil
 	r := recs[0]
 	if c, ok := cnt["a"]; ok { // a scalar through comma-ok: a copy
