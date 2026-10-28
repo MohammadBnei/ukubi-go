@@ -93,3 +93,26 @@ func TestWriteLogs(t *testing.T) {
 		t.Errorf("a model error is logged: %s", buf.Bytes()) // the positive control: the check sees a log line
 	}
 }
+
+// TestEdges: a nil cause, a typed-nil *Error, a shared error wrapped twice and a body past the MiB IsBody reads.
+func TestEdges(t *testing.T) {
+	if e := Down("sim", nil); e.Key != "sim.unavailable" || e.Detail != "" {
+		t.Errorf("down, no cause: %+v", e)
+	}
+	var typed *Error
+	if code, b := body(t, error(typed)); code != 500 || b.Code != Internal {
+		t.Errorf("typed nil: %d %+v", code, b)
+	}
+	shared, a, b := Missing(keyTest, "x"), errors.New("a"), errors.New("b")
+	if wa, wb := shared.Wrap(a), shared.Wrap(b); !errors.Is(wa, a) || errors.Is(wa, b) || !errors.Is(wb, b) || shared.Unwrap() != nil {
+		t.Error("Wrap changed the shared error")
+	}
+	raw := strings.Repeat("x", 3<<20)
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(raw))}
+	if IsBody(resp) {
+		t.Error("a big plain body is a model error")
+	}
+	if rest, _ := io.ReadAll(resp.Body); len(rest) != len(raw) {
+		t.Errorf("the body was cut to %d of %d bytes", len(rest), len(raw))
+	}
+}

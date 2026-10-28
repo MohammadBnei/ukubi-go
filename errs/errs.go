@@ -113,10 +113,11 @@ func NotHere(key Key, say string) *Error { return of(Unimplemented, key, say) }
 // Conflict: it clashes with the current state; try again on fresh state (aborted, 409).
 func Conflict(key Key, say string) *Error { return of(Aborted, key, say) }
 
-// Wrap keeps cause under e (errors.Is and As see it) and returns e.
+// Wrap is a copy of e with cause under it (errors.Is and As see it); e itself is unchanged, so a shared one is safe.
 func (e *Error) Wrap(cause error) *Error {
-	e.cause = cause
-	return e
+	c := *e
+	c.cause = cause
+	return &c
 }
 
 // From is an error a source answered with its own code and words: key "<source>.<code>" (a registered source).
@@ -129,7 +130,11 @@ func From(source string, code Code, say, detail string, cause error) *Error {
 
 // Down is a source that did not answer: unavailable (503), its words in Detail, key "<source>.unavailable".
 func Down(source string, cause error) *Error {
-	return From(source, Unavailable, source+" is not answering", cause.Error(), cause)
+	detail := ""
+	if cause != nil {
+		detail = cause.Error()
+	}
+	return From(source, Unavailable, source+" is not answering", detail, cause)
 }
 
 // Key is a stable error key, from the app's registry. A page translates a key; its message is for a person.
@@ -151,7 +156,7 @@ type Body struct {
 // are logged, not sent (they can hold anything).
 func Write(w http.ResponseWriter, err error) {
 	var e *Error
-	if !errors.As(err, &e) {
+	if !errors.As(err, &e) || e == nil { // a typed-nil *Error matches As with e nil
 		slog.Error(fmt.Sprintf("internal error: %v", err)) // ERROR, through whatever handler the app installed
 		e = of(Internal, KeyInternal, "something went wrong on the server (its log says what)")
 	}
@@ -162,11 +167,15 @@ func Write(w http.ResponseWriter, err error) {
 	_ = json.NewEncoder(w).Encode(Body{Code: e.Code, Key: string(e.Key), Message: e.Say, Source: e.Source, Detail: e.Detail})
 }
 
-// IsBody: resp's body is an error of the model (IsModel). The body is read and put back.
+// IsBody: resp's body is an error of the model (IsModel), judged on its first MiB. The body stays whole: what was
+// read is put back in front of the rest, and a read error comes back to the next reader.
 func IsBody(resp *http.Response) bool {
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	_ = resp.Body.Close()
-	resp.Body = io.NopCloser(bytes.NewReader(b))
+	orig := resp.Body
+	resp.Body = struct {
+		io.Reader
+		io.Closer
+	}{io.MultiReader(bytes.NewReader(b), orig), orig}
 	return err == nil && IsModel(b)
 }
 
