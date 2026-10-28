@@ -1,0 +1,10 @@
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+breaking:
+  # PACKAGE, as agent-fleet and ukubi-bridge: a message moving between files of one package is wire-compatible.
+  use:
+    - PACKAGE

@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package ukubi.errors.v1;
+
+option go_package = "github.com/MohammadBnei/ukubi-go/proto/gen/go/ukubi/errors/v1;errorsv1";
+
+// ErrorKey rides as a detail on a ukubi app's errors (standard §6): a stable key from the app's closed registry, which
+// a client branches on beside the code, and the source whose words the message holds ("" for the app's own). Over
+// Connect it is a connect.ErrorDetail, over gRPC a status detail; connectkeys builds and reads it.
+//
+// The fields are agentfleet.v1.ErrorKey's and bridge.v1.ErrorKey's, number for number, so the bytes are the same and
+// only the type name differs. Never renumber or retype them.
+message ErrorKey {
+  string key = 1;
+  string source = 2;
+}

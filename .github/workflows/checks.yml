@@ -20,3 +20,48 @@ jobs:
       - run: go test -race ./...
       - name: gofmt
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+  buf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # buf breaking reads origin/main
+      # setup_only: the action's default would also lint, format, break and, on push to main, push to the BSR.
+      - uses: bufbuild/buf-action@v1.6.0
+        with:
+          setup_only: true
+          version: 1.72.0
+      - name: buf lint
+        working-directory: proto
+        run: buf lint
+      - name: buf breaking (against main)
+        if: github.event_name == 'pull_request'
+        working-directory: proto
+        run: |
+          # A missing base must fail, never read as "no proto/ on main yet".
+          git rev-parse --verify -q origin/main >/dev/null || { echo "::error::origin/main not fetched"; exit 1; }
+          # A deliberate break opts out by saying so in a commit (Conventional Commits footer), visibly.
+          if git log --format='%B' origin/main..HEAD | grep -q '^BREAKING CHANGE:'; then
+            echo "::notice::skipping buf breaking: a commit declares BREAKING CHANGE:"
+            exit 0
+          fi
+          if git cat-file -e origin/main:proto 2>/dev/null; then
+            buf breaking --against '../.git#ref=origin/main,subdir=proto'
+          else
+            echo "no proto/ on origin/main yet, nothing to break against"
+          fi
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: buf generate
+        working-directory: proto
+        run: buf generate --clean
+      # status, not diff: it also catches generated files that are new (untracked) or gone.
+      - name: generated code is committed
+        run: |
+          if [ -n "$(git status --porcelain -- proto/gen)" ]; then
+            echo "::error::proto/gen is out of date with proto/. Run (cd proto && buf generate --clean) and commit."
+            git status --porcelain -- proto/gen
+            exit 1
+          fi
