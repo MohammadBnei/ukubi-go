@@ -78,7 +78,11 @@ func TestUkubiErrorKeyAdditive(t *testing.T) {
 	both := New(fleet, uk)
 	ds := both.Sourced(connect.CodeAborted, keyChanged, "store", nil).Details()
 	if len(ds) != 2 || ds[0].Type() != "agentfleet.v1.ErrorKey" || ds[1].Type() != "ukubi.errors.v1.ErrorKey" || !sameFields(ds[0].Bytes(), ds[1].Bytes()) {
-		t.Fatalf("details: %v", ds)
+		var names []string
+		for _, d := range ds {
+			names = append(names, d.Type())
+		}
+		t.Fatalf("details %v", names)
 	}
 	err := both.Sourced(connect.CodeAborted, keyChanged, "store", nil)
 	if New(fleet).Of(err) != keyChanged || New(uk).Of(err) != keyChanged {
