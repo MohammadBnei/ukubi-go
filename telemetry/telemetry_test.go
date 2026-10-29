@@ -43,7 +43,7 @@ func TestNone(t *testing.T) {
 	}
 	tr, err := New("http://127.0.0.1:1/v1/traces", "x")
 	if err != nil || tr.tp == nil || len(tr.Interceptors()) != 1 {
-		t.Errorf("an endpoint: %v", err) // the positive control: an endpoint makes a tracer (export happens later)
+		t.Errorf("an endpoint: %v, %d interceptors", err, len(tr.Interceptors())) // the positive control: an endpoint makes a tracer (export happens later)
 	}
 	_ = tr.Shutdown()
 	for _, bad := range []string{"http://[bad", "otel-collector:4318", "collector.svc/v1/traces"} {
@@ -94,6 +94,7 @@ func TestAPISpans(t *testing.T) {
 	const procedure = "/test.v1.TestService/Call"
 	exp := tracetest.NewInMemoryExporter()
 	tr := WithExporter(exp, "ukubi-bridge")
+	defer func() { _ = tr.Shutdown() }()
 	h := connect.NewUnaryHandler(procedure, func(context.Context, *connect.Request[emptypb.Empty]) (*connect.Response[emptypb.Empty], error) {
 		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("no"))
 	}, connect.WithInterceptors(tr.Interceptors()...))

@@ -75,7 +75,9 @@ func WithExporter(exp sdktrace.SpanExporter, service string) *Tracing {
 	return &Tracing{tp: tp}
 }
 
-// Interceptors is what a Connect handler adds for its RPC spans: otelconnect's, or none without tracing.
+// Interceptors is what a Connect handler adds for its RPC spans: otelconnect's, or none without tracing. Mount that
+// handler bare, not through Handler, or each call gets two server spans. They are for a handler, never a client:
+// on a client otelconnect would send a traceparent, and outbound requests carry no context yet.
 // It makes every importer of this package link connect-go and otelconnect, used or not.
 func (t *Tracing) Interceptors() []connect.Interceptor {
 	if t == nil || t.tp == nil {
