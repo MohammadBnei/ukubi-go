@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -11,9 +12,11 @@ import (
 	"strings"
 	"testing"
 
+	"connectrpc.com/connect"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type plain struct{}
@@ -31,12 +34,15 @@ func TestNone(t *testing.T) {
 		if h := tr.Handler("GET /x", plain{}); h != (plain{}) {
 			t.Errorf("%s: the handler is wrapped (%T)", name, h)
 		}
+		if ics := tr.Interceptors(); ics != nil {
+			t.Errorf("%s: %d interceptors", name, len(ics))
+		}
 		if err := tr.Shutdown(); err != nil {
 			t.Errorf("%s: shutdown: %v", name, err)
 		}
 	}
 	tr, err := New("http://127.0.0.1:1/v1/traces", "x")
-	if err != nil || tr.tp == nil {
+	if err != nil || tr.tp == nil || len(tr.Interceptors()) != 1 {
 		t.Errorf("an endpoint: %v", err) // the positive control: an endpoint makes a tracer (export happens later)
 	}
 	_ = tr.Shutdown()
@@ -78,6 +84,45 @@ func TestSpans(t *testing.T) {
 		t.Errorf("links: %+v", s.Links)
 	}
 	if v, ok := s.Resource.Set().Value("service.name"); !ok || v.AsString() != "ukubi-game" {
+		t.Errorf("service.name: %v", v)
+	}
+}
+
+// TestAPISpans: a Connect call through a handler given Interceptors gets one RPC server span named by its procedure,
+// with the error's status; a caller's traceparent is linked, not trusted.
+func TestAPISpans(t *testing.T) {
+	const procedure = "/test.v1.TestService/Call"
+	exp := tracetest.NewInMemoryExporter()
+	tr := WithExporter(exp, "ukubi-bridge")
+	h := connect.NewUnaryHandler(procedure, func(context.Context, *connect.Request[emptypb.Empty]) (*connect.Response[emptypb.Empty], error) {
+		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("no"))
+	}, connect.WithInterceptors(tr.Interceptors()...))
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	req := connect.NewRequest(&emptypb.Empty{})
+	req.Header().Set("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+	_, err := connect.NewClient[emptypb.Empty, emptypb.Empty](srv.Client(), srv.URL+procedure).CallUnary(context.Background(), req)
+	if connect.CodeOf(err) != connect.CodeUnimplemented {
+		t.Fatalf("the answer: %v", err)
+	}
+	if err := tr.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("%d spans", len(spans))
+	}
+	s := spans[0]
+	if s.Name != "test.v1.TestService/Call" || s.SpanKind != trace.SpanKindServer || s.Status.Code.String() != "Error" {
+		t.Errorf("span %q kind %v status %v", s.Name, s.SpanKind, s.Status)
+	}
+	if s.Parent.IsValid() || s.SpanContext.TraceID().String() == "0af7651916cd43dd8448eb211c80319c" {
+		t.Errorf("a public call became a child of the caller's trace: parent %v", s.Parent)
+	}
+	if len(s.Links) != 1 || s.Links[0].SpanContext.TraceID().String() != "0af7651916cd43dd8448eb211c80319c" {
+		t.Errorf("links: %+v", s.Links)
+	}
+	if v, ok := s.Resource.Set().Value("service.name"); !ok || v.AsString() != "ukubi-bridge" {
 		t.Errorf("service.name: %v", v)
 	}
 }

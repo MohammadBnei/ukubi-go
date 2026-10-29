@@ -1,6 +1,7 @@
 // Package telemetry is ukubi's traces (mountain plan/15 §7): pushed over OTLP/HTTP when configured, nothing at all
 // otherwise. A Tracing with no endpoint wraps nothing, so an app without one serves exactly what it served before.
-// It came from ukubi-game's internal/telemetry by way of mountain/pkg; the one change since is the error handler below.
+// It came from ukubi-game's internal/telemetry by way of mountain/pkg; the changes since are the error handler below
+// and Interceptors, from ukubi-bridge's internal/telemetry.
 //
 // Everything that decides a span is passed explicitly (the provider, the propagator, a no-op meter for otelhttp's own
 // metrics, so no series is added anywhere), so a test can trace one router without touching another. The one OTel
@@ -18,7 +19,8 @@
 // limits and OTEL_GO_X_*: the libraries' own reads, which each app's configuration docs name (the game's README,
 // atlas's main.go doc comment).
 //
-// Spans: one server span per route, named by its pattern; a request no route takes has none. Every server is treated
+// Spans: one server span per route, named by its pattern; a request no route takes has none. A Connect handler given
+// Interceptors has one RPC server span per call, named by its procedure, and no metrics. Every server is treated
 // as public, so a traceparent from outside starts a new trace linked to it, never a child (a public endpoint): the
 // choice is made before any gate runs, so it can only see what a caller can forge. Outbound requests carry no context
 // yet; when propagation lands, a trust option comes with it, decided after the gate (a machine principal's call).
@@ -32,6 +34,8 @@ import (
 	"net/url"
 	"time"
 
+	"connectrpc.com/connect"
+	"connectrpc.com/otelconnect"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -69,6 +73,20 @@ func WithExporter(exp sdktrace.SpanExporter, service string) *Tracing {
 		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())),
 		sdktrace.WithResource(resource.NewSchemaless(semconv.ServiceName(service))))
 	return &Tracing{tp: tp}
+}
+
+// Interceptors is what a Connect handler adds for its RPC spans: otelconnect's, or none without tracing.
+// It makes every importer of this package link connect-go and otelconnect, used or not.
+func (t *Tracing) Interceptors() []connect.Interceptor {
+	if t == nil || t.tp == nil {
+		return nil
+	}
+	ic, err := otelconnect.NewInterceptor(otelconnect.WithTracerProvider(t.tp),
+		otelconnect.WithPropagator(propagation.TraceContext{}), otelconnect.WithoutMetrics())
+	if err != nil {
+		panic(err) // only a metrics option can fail, and metrics are off
+	}
+	return []connect.Interceptor{ic}
 }
 
 // Handler is h with a server span per request named pattern, or h itself without tracing.
