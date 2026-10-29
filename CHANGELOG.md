@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 - 2026-10-29
+
+### Features
+
+- **telemetry:** Interceptors, otelconnect's RPC spans for a Connect handler, moved from ukubi-bridge
+
 ## 0.2.0 - 2026-10-29
 
 ### Features
