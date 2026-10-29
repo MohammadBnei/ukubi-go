@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 - Unreleased
+
+### Features
+
+- **proto:** ukubi.errors.v1 key and keys options for proto-declared error keys (#6)
+- **errs:** connectkeys.CheckDeclared holds proto-declared keys to the Go registry (#6)
+
 ## 0.1.0 - 2026-10-28
 
 ### Features
