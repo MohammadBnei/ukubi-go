@@ -22,8 +22,8 @@
 //
 // Spans: one server span per route, named by its pattern; a request no route takes has none. A Connect handler given
 // Interceptors, or a gRPC server given ServerOption, has one RPC server span per call, named by its procedure or
-// method, and no metrics. Every server is treated
-// as public, so a traceparent from outside starts a new trace linked to it, never a child (a public endpoint): the
+// method, and no metrics. Every server is treated as public, so a traceparent from outside starts a new trace linked
+// to it, never a child (a public endpoint): the
 // choice is made before any gate runs, so it can only see what a caller can forge. Outbound requests carry no context
 // yet; when propagation lands, a trust option comes with it, decided after the gate (a machine principal's call).
 package telemetry

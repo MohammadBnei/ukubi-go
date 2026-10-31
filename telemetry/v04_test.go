@@ -5,6 +5,8 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -59,17 +61,21 @@ func TestServerOption(t *testing.T) {
 	}
 }
 
-// TestIDsOnly: WithExporter(nil) makes spans, so a context holds a valid trace id, and exports nothing.
+// TestIDsOnly: WithExporter(nil) still wraps, so a request's context holds a valid trace id, and it has no span
+// processor, so nothing is exported.
 func TestIDsOnly(t *testing.T) {
 	tr := WithExporter(nil, "core")
 	defer func() { _ = tr.Shutdown() }()
-	if tr.Interceptors() == nil {
-		t.Fatal("ids-only tracing has no interceptors")
+	var sc trace.SpanContext
+	h := tr.Handler("/x", http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		sc = trace.SpanContextFromContext(r.Context())
+	}))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/x", nil))
+	if !sc.IsValid() {
+		t.Error("no valid span context in the handler")
 	}
-	ctx, span := tr.tp.Tracer("t").Start(context.Background(), "op")
-	span.End()
-	if !trace.SpanContextFromContext(ctx).IsValid() {
-		t.Error("no valid span context")
+	if n := len(tr.Interceptors()); n != 1 {
+		t.Errorf("%d interceptors, want otelconnect's", n)
 	}
 	if err := tr.Flush(); err != nil {
 		t.Errorf("flush: %v", err)
