@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 - 2026-10-31
+
+### Features
+
+- **telemetry:** ServerOption, otelgrpc's RPC spans for a gRPC server, a caller's traceparent linked, never the parent
+- **telemetry:** WithExporter(nil) is ids only: spans and trace ids, nothing exported
+- **telemetry:** NewLoggerAt, NewLogger with a minimum level
+
 ## 0.3.0 - 2026-10-29
 
 ### Features

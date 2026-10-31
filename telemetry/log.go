@@ -14,8 +14,11 @@ import (
 // log.Fatal and log.Panic too (an app gives those their level first), with log's prefix and any flags set after the
 // install inside msg (install it after log.SetFlags, or drop the call). Any valid span adds its ids, sampled or not.
 // Under a logger's WithGroup the ids land inside the group, as every attribute of the record does: the apps open none.
-func NewLogger(w io.Writer) *slog.Logger {
-	return slog.New(traceHandler{slog.NewJSONHandler(w, nil)})
+func NewLogger(w io.Writer) *slog.Logger { return NewLoggerAt(w, nil) }
+
+// NewLoggerAt is NewLogger with a minimum level (nil: INFO), for an app's LOG_LEVEL.
+func NewLoggerAt(w io.Writer, level slog.Leveler) *slog.Logger {
+	return slog.New(traceHandler{slog.NewJSONHandler(w, &slog.HandlerOptions{Level: level})})
 }
 
 // traceHandler adds the span's ids to a record whose context holds one.
