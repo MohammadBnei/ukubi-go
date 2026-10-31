@@ -1,5 +1,6 @@
 // Package telemetry is ukubi's traces (mountain plan/15 §7): pushed over OTLP/HTTP when configured, nothing at all
-// otherwise. A Tracing with no endpoint wraps nothing, so an app without one serves exactly what it served before.
+// otherwise. A Tracing with no endpoint wraps nothing, so an app without one serves exactly what it served before;
+// WithExporter(nil) is the exception an app chooses: spans and trace ids, nothing exported.
 // It came from ukubi-game's internal/telemetry by way of mountain/pkg; the changes since are the error handler below
 // and Interceptors, from ukubi-bridge's internal/telemetry.
 //
@@ -20,8 +21,9 @@
 // atlas's main.go doc comment).
 //
 // Spans: one server span per route, named by its pattern; a request no route takes has none. A Connect handler given
-// Interceptors has one RPC server span per call, named by its procedure, and no metrics. Every server is treated
-// as public, so a traceparent from outside starts a new trace linked to it, never a child (a public endpoint): the
+// Interceptors, or a gRPC server given ServerOption, has one RPC server span per call, named by its procedure or
+// method, and no metrics. Every server is treated as public, so a traceparent from outside starts a new trace linked
+// to it, never a child (a public endpoint): the
 // choice is made before any gate runs, so it can only see what a caller can forge. Outbound requests carry no context
 // yet; when propagation lands, a trust option comes with it, decided after the gate (a machine principal's call).
 package telemetry
@@ -36,6 +38,7 @@ import (
 
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -44,6 +47,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
+	"google.golang.org/grpc"
 )
 
 // Tracing is an app's tracer, or none (the zero value: Handler wraps nothing).
@@ -67,12 +71,17 @@ func New(endpoint, service string) (*Tracing, error) {
 	return WithExporter(exp, service), nil
 }
 
-// WithExporter is a tracing over exp: New's, or a test's in-memory one.
+// WithExporter is a tracing over exp: New's, or a test's in-memory one. A nil exp is ids only: spans, so trace ids on
+// log lines and responses, with nothing exported (an app that keeps ids without a trace backend).
 func WithExporter(exp sdktrace.SpanExporter, service string) *Tracing {
-	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp),
+	opts := []sdktrace.TracerProviderOption{
 		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())),
-		sdktrace.WithResource(resource.NewSchemaless(semconv.ServiceName(service))))
-	return &Tracing{tp: tp}
+		sdktrace.WithResource(resource.NewSchemaless(semconv.ServiceName(service))),
+	}
+	if exp != nil {
+		opts = append(opts, sdktrace.WithBatcher(exp))
+	}
+	return &Tracing{tp: sdktrace.NewTracerProvider(opts...)}
 }
 
 // Interceptors is what a Connect handler adds for its RPC spans: otelconnect's, or none without tracing. Mount that
@@ -89,6 +98,19 @@ func (t *Tracing) Interceptors() []connect.Interceptor {
 		panic(err) // only a metrics option can fail, and metrics are off
 	}
 	return []connect.Interceptor{ic}
+}
+
+// ServerOption is what a gRPC server adds for its RPC spans, one server span per call named by its method, or nothing
+// without tracing. A caller's traceparent is linked, never the parent (a public endpoint, as Handler and Interceptors).
+func (t *Tracing) ServerOption() grpc.ServerOption {
+	if t == nil || t.tp == nil {
+		return grpc.EmptyServerOption{}
+	}
+	return grpc.StatsHandler(otelgrpc.NewServerHandler(
+		otelgrpc.WithTracerProvider(t.tp),
+		otelgrpc.WithPropagators(propagation.TraceContext{}),
+		otelgrpc.WithMeterProvider(noopmetric.NewMeterProvider()),
+		otelgrpc.WithPublicEndpoint()))
 }
 
 // Handler is h with a server span per request named pattern, or h itself without tracing.
