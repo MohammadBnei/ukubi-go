@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   go:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ukubi-build]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
@@ -29,7 +29,7 @@ jobs:
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
 
   buf:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ukubi-build]
     steps:
       - uses: actions/checkout@v5
         with:
