@@ -34,11 +34,18 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0 # buf breaking reads the base: the PR's base branch, or main's previous commit
-      # setup_only: the action's default would also lint, format, break and, on push to main, push to the BSR.
-      - uses: bufbuild/buf-action@v1.6.0
-        with:
-          setup_only: true
-          version: 1.72.0
+      # A pinned, checksum-checked binary, not bufbuild/buf-action: the action asks GitHub's API unauthenticated and
+      # Forgejo runners hit its rate limit. The sha256 is the one in the release's sha256.txt.
+      - name: install buf
+        env:
+          BUF_VERSION: 1.72.0
+          BUF_SHA256: 8720830e26a733da55bb89bcd3cb44849c0965fc0c44fb5d691cccdc64dca5af
+        run: |
+          mkdir -p "$RUNNER_TEMP/buf"
+          curl -fsSL -o "$RUNNER_TEMP/buf/buf" "https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/buf-Linux-x86_64"
+          echo "$BUF_SHA256  $RUNNER_TEMP/buf/buf" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/buf/buf"
+          echo "$RUNNER_TEMP/buf" >> "$GITHUB_PATH"
       - name: buf lint
         working-directory: proto
         run: buf lint
