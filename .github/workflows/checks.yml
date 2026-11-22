@@ -16,6 +16,41 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: false # the split is explicit, see Cache keys
+      # Cache model (owner decision 2026-11-22): a PR restores and saves; push, tag,
+      # dispatch, schedule and workflow_call from main never restore (a PR job can forge
+      # the cache write key), they run cold and only save. Decided here in shell, not in an if:.
+      # CACHE_EPOCH is a user-level Forgejo variable; bump it to purge every cache at once.
+      - name: Cache keys
+        id: cachekeys
+        env:
+          REF: ${{ github.ref }}
+          EPOCH: ${{ vars.CACHE_EPOCH || 'e1' }}
+        run: |
+          set -euo pipefail
+          pr=false
+          if [[ "$REF" == refs/pull/* ]]; then pr=true; fi
+          h=$({ cat go.mod; [ ! -f go.sum ] || cat go.sum; } | sha256sum | cut -c1-16)
+          {
+            echo "pr=$pr"
+            echo "base=${EPOCH}-go-checks-${RUNNER_OS}-${h}"
+            echo "prefix=${EPOCH}-go-checks-${RUNNER_OS}-"
+            echo "mod=$(go env GOMODCACHE)"
+            echo "build=$(go env GOCACHE)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Restore Go cache
+        if: steps.cachekeys.outputs.pr == 'true'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ${{ steps.cachekeys.outputs.mod }}
+            ${{ steps.cachekeys.outputs.build }}
+          # Never an exact hit (the run id is new): restore-keys picks the newest entry.
+          key: ${{ steps.cachekeys.outputs.base }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ steps.cachekeys.outputs.base }}-
+            ${{ steps.cachekeys.outputs.prefix }}
       - run: go vet ./...
       # -vettool replaces vet's own analyzers, so it runs beside go vet ./..., not instead. A fresh GOCACHE: vet's cache
       # key leaves out the files the build excludes, which envban reads. errkeys is off: ukubi-go is the model, not an
@@ -24,9 +59,28 @@ jobs:
         run: |
           go build -o "$RUNNER_TEMP/ukubicheck" ./cmd/ukubicheck
           GOCACHE="$RUNNER_TEMP/vetcache" go vet -vettool="$RUNNER_TEMP/ukubicheck" -errkeys=false ./...
-      - run: go test -race ./...
+      - name: go test -race
+        run: |
+          set -euo pipefail
+          # These packages run subprocesses (go vet -vettool, a child process) over files Go's test
+          # cache cannot track: -count=1 in their own invocation, same flags so the binaries are shared.
+          # Every other package may come from the test cache.
+          unc=(./cmd/ukubicheck ./telemetry)
+          go list "${unc[@]}" > "$RUNNER_TEMP/uncached.txt"
+          rest=()
+          while IFS= read -r pkg; do rest+=("$pkg"); done < <(go list ./... | grep -vxFf "$RUNNER_TEMP/uncached.txt" || true)
+          [ ${#rest[@]} -eq 0 ] || go test -race "${rest[@]}"
+          go test -race -count=1 "${unc[@]}"
       - name: gofmt
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+      - name: Save Go cache
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ${{ steps.cachekeys.outputs.mod }}
+            ${{ steps.cachekeys.outputs.build }}
+          key: ${{ steps.cachekeys.outputs.base }}-${{ github.run_id }}
 
   buf:
     runs-on: k8s-ubuntu-latest
@@ -71,6 +125,41 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: false # the split is explicit, see Cache keys
+      # Cache model (owner decision 2026-11-22): a PR restores and saves; push, tag,
+      # dispatch, schedule and workflow_call from main never restore (a PR job can forge
+      # the cache write key), they run cold and only save. Decided here in shell, not in an if:.
+      # CACHE_EPOCH is a user-level Forgejo variable; bump it to purge every cache at once.
+      - name: Cache keys
+        id: cachekeys
+        env:
+          REF: ${{ github.ref }}
+          EPOCH: ${{ vars.CACHE_EPOCH || 'e1' }}
+        run: |
+          set -euo pipefail
+          pr=false
+          if [[ "$REF" == refs/pull/* ]]; then pr=true; fi
+          h=$({ cat go.mod; [ ! -f go.sum ] || cat go.sum; } | sha256sum | cut -c1-16)
+          {
+            echo "pr=$pr"
+            echo "base=${EPOCH}-go-buf-${RUNNER_OS}-${h}"
+            echo "prefix=${EPOCH}-go-buf-${RUNNER_OS}-"
+            echo "mod=$(go env GOMODCACHE)"
+            echo "build=$(go env GOCACHE)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Restore Go cache
+        if: steps.cachekeys.outputs.pr == 'true'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ${{ steps.cachekeys.outputs.mod }}
+            ${{ steps.cachekeys.outputs.build }}
+          # Never an exact hit (the run id is new): restore-keys picks the newest entry.
+          key: ${{ steps.cachekeys.outputs.base }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ steps.cachekeys.outputs.base }}-
+            ${{ steps.cachekeys.outputs.prefix }}
       - name: buf generate
         working-directory: proto
         run: buf generate --clean
@@ -82,3 +171,11 @@ jobs:
             git status --porcelain -- proto/gen
             exit 1
           fi
+
+      - name: Save Go cache
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ${{ steps.cachekeys.outputs.mod }}
+            ${{ steps.cachekeys.outputs.build }}
+          key: ${{ steps.cachekeys.outputs.base }}-${{ github.run_id }}
